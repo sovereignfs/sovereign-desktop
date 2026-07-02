@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the bundled onboarding page in the main window. Remote instance content gets no IPC access (Tauri default).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
+    }
+  ]
+}

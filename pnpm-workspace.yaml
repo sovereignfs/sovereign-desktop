@@ -1,0 +1,7 @@
+# Single-package repo — this file exists to mark the workspace root (so pnpm
+# never attaches to an enclosing workspace) and to hold pnpm settings.
+
+# pnpm 11 blocks dependency build scripts by default; esbuild (via vite/vitest)
+# needs its postinstall for the native binary.
+allowBuilds:
+  esbuild: true
