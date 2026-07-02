@@ -1,0 +1,24 @@
+[package]
+name = "sovereign-desktop"
+version = "0.1.0"
+description = "Sovereign desktop shell — loads your self-hosted Sovereign instance"
+authors = ["Sovereign contributors"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/sovereignfs/sovereign-desktop"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name (Windows
+# linker requirement — see https://github.com/rust-lang/cargo/issues/8519).
+name = "sovereign_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-http = "2"
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
