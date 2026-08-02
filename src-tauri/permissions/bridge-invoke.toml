@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-bridge-invoke"
+description = """
+Allows calling the app-defined `bridge_invoke` command — the single narrow
+dispatch point for `sdk.device.*` capability calls (RFC 0083, workstream
+0003 leg 3). Granted to the loaded instance's origin by the `bridge`
+capability; see that capability file's doc comment for the security
+reasoning.
+"""
+commands.allow = ["bridge_invoke"]
