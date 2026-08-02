@@ -1,30 +1,31 @@
 /**
  * Onboarding / instance-manager view: add an instance (validated against the
- * public `GET /api/health` liveness probe), list stored instances, switch, and
+ * public `GET /api/instance` endpoint), list stored instances, switch, and
  * remove. Rendered on first launch and whenever the native
  * "Instances → Switch Instance…" menu navigates back to this page.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { addInstance, listInstances, removeInstance, setActiveUrl } from './store';
-import { instanceLabel, isHealthyResponse, normalizeInstanceUrl } from './validate';
+import { normalizeInstanceUrl, parseInstanceResponse } from './validate';
+import type { InstanceInfo } from './validate';
 
-const HEALTH_TIMEOUT_MS = 5000;
+const VALIDATE_TIMEOUT_MS = 5000;
 
 /**
- * Check that `origin` serves a Sovereign instance. Uses the Tauri HTTP plugin —
- * the request is made from the Rust side, so the instance does not need CORS
- * headers for the shell's local origin.
+ * Check that `origin` serves a genuine Sovereign instance and read its
+ * display name. Uses the Tauri HTTP plugin — the request is made from the
+ * Rust side, so the instance does not need CORS headers for the shell's
+ * local origin.
  */
-async function checkInstanceHealth(origin: string): Promise<boolean> {
+async function checkInstance(origin: string): Promise<InstanceInfo | null> {
   try {
-    const res = await tauriFetch(`${origin}/api/health`, {
+    const res = await tauriFetch(`${origin}/api/instance`, {
       method: 'GET',
-      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS),
     });
-    if (res.status !== 200) return false;
-    return isHealthyResponse(res.status, await res.json());
+    return parseInstanceResponse(res.status, await res.json());
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -116,16 +117,16 @@ export async function renderOnboarding(root: HTMLElement): Promise<void> {
 
       submit.disabled = true;
       submit.textContent = 'Connecting…';
-      const healthy = await checkInstanceHealth(origin);
+      const info = await checkInstance(origin);
       submit.disabled = false;
       submit.textContent = firstLaunch ? 'Connect' : 'Add instance';
 
-      if (!healthy) {
+      if (info === null) {
         error.textContent = `Could not reach a Sovereign instance at ${origin}. Check the URL and try again.`;
         return;
       }
 
-      await addInstance({ url: origin, label: instanceLabel(origin), addedAt: Date.now() });
+      await addInstance({ url: origin, label: info.instanceName, addedAt: Date.now() });
       loadInstance(origin);
     })();
   });

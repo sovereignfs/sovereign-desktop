@@ -32,8 +32,13 @@ shell's scope or behaviour.
   add remote URLs to capability windows or enable `dangerousRemoteDomainIpcAccess`.
   The one thing injected into remote pages is the `window.__SOVEREIGN_DESKTOP__`
   marker (see below) — a plain frozen data object, never a capability bridge.
-- **Instance validation targets the public `GET /api/health`** liveness probe
-  (`200` + `{ "status": "ok" }`). Do not use `/api/admin/health` — that endpoint
+- **Instance validation targets the public `GET /api/instance`** endpoint
+  (`200` + `{ "status": "ok", "product": "sovereign", "instanceName": string,
+"platformVersion": string }` — sovereign epic task 20.2; supersedes the
+  bare `/api/health` liveness probe this shell used before that endpoint
+  existed, which couldn't reliably distinguish a genuine Sovereign instance
+  from any other server answering `{ "status": "ok" }`, or surface the
+  instance's display name). Do not use `/api/admin/health` — that endpoint
   is admin-key-gated.
 - **Use `@tauri-apps/plugin-http` for shell→instance requests** — a plain
   `fetch` from the local page is blocked by CORS at the instance.
@@ -46,7 +51,7 @@ shell's scope or behaviour.
 index.html + src/        bundled onboarding / instance-manager page (Vite)
   main.ts                boot: stored active instance → load it; else onboarding
                          (?manage=1 forces the manager view)
-  onboarding.ts          add/switch/remove instances; /api/health validation
+  onboarding.ts          add/switch/remove instances; /api/instance validation
   store.ts               persistence via @tauri-apps/plugin-store (instances.json)
   validate.ts            pure URL/health helpers — unit-tested
 src-tauri/               Tauri 2 app

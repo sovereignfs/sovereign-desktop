@@ -1,6 +1,6 @@
 {
   "name": "sovereign-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Sovereign desktop shell — a minimal Tauri app that loads your self-hosted Sovereign instance",
   "license": "AGPL-3.0-or-later",
