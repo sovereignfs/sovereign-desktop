@@ -3,13 +3,72 @@
 //! The shell is intentionally thin: all product functionality is served by the
 //! user's self-hosted instance. Rust exists only for native glue that must
 //! survive the webview navigating to remote content — the application menu and
-//! its "Switch Instance…" handler, plus the shell-detection marker injected into
-//! every page.
+//! its "Switch Instance…" handler, the shell-detection marker injected into
+//! every page, and (RFC 0083, workstream 0003 leg 3) the device bridge.
+
+mod bridge;
 
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 const SWITCH_INSTANCE_MENU_ID: &str = "switch-instance";
+
+/// Must match `@sovereignfs/bridge`'s `PROTOCOL_VERSION` constant
+/// (`packages/bridge/src/protocol.ts` in the `sovereign` monorepo) — a
+/// mismatch degrades to the web transport with a console warning rather than
+/// breaking (RFC 0083 open question 2), so drifting this is a silent
+/// capability loss, not a hard failure, but keep it in sync regardless.
+const BRIDGE_PROTOCOL_VERSION: u32 = 1;
+
+/// JavaScript injected into every page load — including the loaded instance —
+/// defining `window.__SOVEREIGN_BRIDGE__` per `@sovereignfs/bridge`'s
+/// `InstalledBridge` wire shape (`packages/bridge/src/protocol.ts`). Only
+/// `notifications.native` is advertised — `haptics.impact` is a deliberate
+/// Tauri no-op per RFC 0083 §7, so omitting it here lets the page-side
+/// bridge's own "no native shell answers this" path report `unavailable`,
+/// exactly like a plain browser with no Vibration API.
+///
+/// `invoke()` calls the low-level `window.__TAURI_INTERNALS__.invoke(...)` —
+/// not `@tauri-apps/api`'s `invoke` wrapper, since this script is a raw
+/// string with no bundler — reaching exactly one narrow custom command,
+/// `bridge_invoke` (`src/bridge.rs`), which the `bridge` capability grants to
+/// the loaded instance's origin. See that capability file's own doc comment
+/// for why this is safe: `bridge_invoke` cannot do anything a plugin
+/// couldn't already do by calling the standard Web Notifications API in a
+/// browser tab.
+fn bridge_script() -> String {
+    format!(
+        "Object.defineProperty(window, '__SOVEREIGN_BRIDGE__', {{ \
+             value: Object.freeze({{ \
+                 protocolVersion: {protocol_version}, \
+                 shell: Object.freeze({{ name: 'sovereign-desktop', version: '{version}', platform: '{platform}' }}), \
+                 capabilities: [{{ name: 'notifications.native', version: 1 }}], \
+                 invoke: function (capability, payload) {{ \
+                     return window.__TAURI_INTERNALS__.invoke('bridge_invoke', {{ capability: capability, payload: payload }}); \
+                 }} \
+             }}), \
+             writable: false, configurable: false, enumerable: true \
+         }});",
+        protocol_version = BRIDGE_PROTOCOL_VERSION,
+        version = env!("CARGO_PKG_VERSION"),
+        platform = tauri_platform_name(),
+    )
+}
+
+/// `BridgeHandshake['shell']['platform']` values are `'ios' | 'android' |
+/// 'macos' | 'windows' | 'linux' | 'web'` — a different vocabulary from
+/// Rust's `std::env::consts::OS` (`"macos"` matches, but Tauri's own `mobile`
+/// cfg and OS constants for the others don't line up 1:1), so this maps
+/// explicitly rather than passing `std::env::consts::OS` through.
+fn tauri_platform_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    }
+}
 
 /// JavaScript injected into every page load — including the loaded instance —
 /// before the page's own scripts run. It defines a frozen, read-only
@@ -58,16 +117,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![bridge::bridge_invoke])
         .setup(|app| {
             // The main window is created here (not in tauri.conf.json) so it can
-            // carry the shell-detection initialization script. The script runs on
-            // every navigation, so the marker is present on the loaded instance
-            // too, not just the bundled onboarding page.
+            // carry the shell-detection and device-bridge initialization
+            // scripts. Both run on every navigation, so they're present on the
+            // loaded instance too, not just the bundled onboarding page.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Sovereign")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(480.0, 360.0)
                 .initialization_script(&desktop_marker_script())
+                .initialization_script(&bridge_script())
                 .build()?;
 
             // Start from the default menu so the standard app/Edit/Window items

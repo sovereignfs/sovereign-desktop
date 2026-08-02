@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "bridge",
+  "description": "Device bridge (RFC 0083, workstream 0003 leg 3): grants the loaded self-hosted instance — a runtime-chosen, non-local origin — IPC access to exactly one app-defined command, `bridge_invoke`, and nothing else. Deliberately separate from the `default` capability, which stays local-only (no `remote` field) and keeps its broader core:default/store:default grant scoped to the bundled onboarding page only, per this repo's 'remote instance content must never get Tauri IPC access' rule. That rule's spirit — remote content gets no meaningful capability beyond what the web platform itself already exposes — still holds here: `bridge_invoke`'s only implemented action (`notifications.native`) does exactly what a plugin could already do by calling the standard Web Notifications API in a browser tab, just backed by real native delivery (`tauri-plugin-notification`'s `NotificationExt`, itself gated to this Rust-side caller only — its own JS-invokable commands are never granted to any origin, local or remote).",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://**", "http://**"]
+  },
+  "permissions": ["allow-bridge-invoke"]
+}

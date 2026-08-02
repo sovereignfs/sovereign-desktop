@@ -27,11 +27,24 @@ shell's scope or behaviour.
   Do not add Rust commands where a JS plugin API exists.
 - **Never hardcode an instance URL** anywhere outside tests. The shell is
   universal — one binary for every self-hosted instance.
-- **Remote instance content must never get Tauri IPC access.** Capabilities in
-  `src-tauri/capabilities/` apply to the bundled onboarding page only; do not
-  add remote URLs to capability windows or enable `dangerousRemoteDomainIpcAccess`.
-  The one thing injected into remote pages is the `window.__SOVEREIGN_DESKTOP__`
-  marker (see below) — a plain frozen data object, never a capability bridge.
+- **Remote instance content gets no IPC access beyond the one narrow device
+  bridge command, deliberately.** The `default` capability
+  (`src-tauri/capabilities/default.json`) stays local-only — no `remote`
+  field, no `dangerousRemoteDomainIpcAccess` — and applies to the bundled
+  onboarding page only. The **sole exception**, added in workstream 0003 leg
+  3 (RFC 0083): `src-tauri/capabilities/bridge.json` grants the loaded
+  instance's origin (`remote.urls`) exactly one app-defined command,
+  `bridge_invoke` (`src-tauri/src/bridge.rs`) — the Tauri transport of
+  `@sovereignfs/bridge`, injected as `window.__SOVEREIGN_BRIDGE__` alongside
+  the marker below. This is a deliberate, narrowly-scoped amendment to the
+  original absolute rule, not a loosening of it: `bridge_invoke` cannot do
+  anything a plugin couldn't already do by calling a standard Web API in a
+  browser tab (e.g. Web Notifications) — it just gets real native delivery.
+  Any _other_ new remote capability grant, or widening `bridge.json`'s own
+  permission set beyond `allow-bridge-invoke`, is still the kind of change
+  this rule exists to prevent — treat it with the same scrutiny leg 3's own
+  PR description documents, not as precedent that remote IPC access is now
+  generally fine.
 - **Instance validation targets the public `GET /api/instance`** endpoint
   (`200` + `{ "status": "ok", "product": "sovereign", "instanceName": string,
 "platformVersion": string }` — sovereign epic task 20.2; supersedes the
@@ -57,8 +70,12 @@ index.html + src/        bundled onboarding / instance-manager page (Vite)
 src-tauri/               Tauri 2 app
   src/lib.rs             plugins + "Instances → Switch Instance…" menu (⌘⇧I),
                          which navigates the webview back to the local page
+  src/bridge.rs          device bridge dispatch — the single `bridge_invoke`
+                         command (see "Device bridge" below)
   tauri.conf.json        window, CSP, bundle targets, macOS 13 minimum
-  capabilities/          IPC permissions for the local page only
+  capabilities/          default.json (local page only) + bridge.json (the
+                         one narrow remote grant — see "Hard rules" above)
+  permissions/           bridge-invoke.toml — the ACL permission bridge.json grants
 ```
 
 The local page acts as a splash on boot: when an active instance is stored, it
@@ -76,6 +93,37 @@ including the loaded instance — before page scripts run. The web app / SDK
 features. Keep it a pure data marker; never widen it into an IPC bridge. Because
 the window is created in Rust, window properties (title, size, min-size) live in
 `lib.rs`, not the config.
+
+### Device bridge (`@sovereignfs/bridge`'s Tauri transport, RFC 0083)
+
+A second `initialization_script`, chained after the marker script above,
+defines `window.__SOVEREIGN_BRIDGE__` on every page load — the
+`InstalledBridge` shape `@sovereignfs/bridge`'s page-side code looks for
+(`packages/bridge/src/protocol.ts` in the monorepo). Unlike the marker, this
+one **is** a real IPC bridge, by deliberate exception to the hard rule above:
+`invoke()` calls `window.__TAURI_INTERNALS__.invoke('bridge_invoke', ...)`,
+reaching `src-tauri/src/bridge.rs`'s single command, which the `bridge`
+capability grants to the loaded instance's origin.
+
+- **Only advertise a capability this build actually implements.** `bridge.rs`
+  dispatches `notifications.native` (real native delivery via
+  `tauri-plugin-notification`'s `NotificationExt`, not `window.Notification`
+  — the plugin's own JS-side `guest-js` for `requestPermission`/
+  `sendNotification` just calls the standard Notification API directly,
+  which may not even exist in WKWebView; going through `NotificationExt`
+  sidesteps that entirely). `haptics.impact` is a deliberate no-op — falling
+  through to `unavailable` — per RFC 0083 §7's own table for this transport;
+  do not add a fake implementation to "complete" the capability list.
+- **Adding a new bridge capability means adding to all three places in
+  lockstep**: the `capabilities` array in `bridge_script()` (`lib.rs`), the
+  `match` in `bridge_invoke` (`bridge.rs`), and — if it needs new native
+  access `allow-bridge-invoke` doesn't already cover — a new permission file
+  under `permissions/` referenced from `bridge.json`.
+- `getPermission()`/`requestPermission()` on this transport report `'granted'`
+  unconditionally (SDK-side, `packages/sdk/src/device-client.ts` in the
+  monorepo) — there is no bridge action for a permission pre-check, only the
+  one-shot `show`. The OS still gates the real permission when `show()`
+  actually runs; that outcome surfaces through `show()`'s own `DeviceResult`.
 
 ## Conventions
 
