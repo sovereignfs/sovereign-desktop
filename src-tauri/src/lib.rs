@@ -11,6 +11,7 @@ mod bridge;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 const SWITCH_INSTANCE_MENU_ID: &str = "switch-instance";
 const TRAY_OPEN_MENU_ID: &str = "tray-open";
@@ -126,6 +127,32 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Percent-encodes a `sovereign://` URL for embedding as the bundled page's
+/// `?deeplink=` query value.
+fn encode_deep_link_param(url: &url::Url) -> String {
+    url::form_urlencoded::byte_serialize(url.as_str().as_bytes()).collect()
+}
+
+/// Forces the webview back to the local page with the incoming deep link
+/// attached as `?deeplink=`, regardless of what it currently shows — mirrors
+/// `open_instance_manager`. This is the only reliable fix for the deep-link
+/// plugin's own documented macOS race (`deep-link://new-url` can arrive
+/// slightly after this app's own `setup()` / initial page load): rather than
+/// trying to win the race, the JS side's `main.ts` boot() always defers to a
+/// `?deeplink=` param present on *this* page load, so re-navigating here
+/// after the fact is sufficient even if the webview had already moved on to
+/// a stored instance in the meantime.
+fn navigate_to_deep_link<R: Runtime>(app: &AppHandle<R>, incoming: &url::Url) {
+    let Some(webview) = app.get_webview_window("main") else {
+        return;
+    };
+    show_window(&webview);
+    let target = format!("{}/?deeplink={}", app_origin(), encode_deep_link_param(incoming));
+    if let Ok(target) = target.parse() {
+        let _ = webview.navigate(target);
+    }
+}
+
 fn show_window<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     let _ = window.show();
     let _ = window.unminimize();
@@ -138,13 +165,55 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![bridge::bridge_invoke])
         .setup(|app| {
+            // On Windows/Linux, `sovereign://...` launches a *new* OS process with
+            // the URL as its only CLI argument — the deep-link plugin parses that
+            // during its own setup, which runs before this closure, so it's already
+            // available here. On macOS the URL instead arrives shortly after this
+            // closure returns, as a `deep-link://new-url` event (see `on_open_url`
+            // below) — `get_current()` is never populated in time for a macOS cold
+            // launch, by design of the plugin.
+            let initial_deep_link = app
+                .deep_link()
+                .get_current()
+                .ok()
+                .flatten()
+                .and_then(|urls| urls.into_iter().next());
+
+            // AppImages on Linux (and dev builds on Windows, which have no
+            // installer to register the scheme) need runtime registration; macOS
+            // and installed Windows/Linux packages register the scheme at
+            // bundle/install time from `tauri.conf.json`'s plugin config instead.
+            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+            {
+                let _ = app.deep_link().register_all();
+            }
+
+            // Fires for every `sovereign://` open while the app is already running,
+            // and — on macOS only — for a cold launch too, once the OS delivers it.
+            app.deep_link().on_open_url({
+                let app_handle = app.handle().clone();
+                move |event| {
+                    if let Some(url) = event.urls().into_iter().next() {
+                        navigate_to_deep_link(&app_handle, &url);
+                    }
+                }
+            });
+
             // The main window is created here (not in tauri.conf.json) so it can
             // carry the shell-detection and device-bridge initialization
             // scripts. Both run on every navigation, so they're present on the
-            // loaded instance too, not just the bundled onboarding page.
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            // loaded instance too, not just the bundled onboarding page. A
+            // Windows/Linux cold-launch deep link is attached as `?deeplink=` on
+            // this very first load; `main.ts`'s boot() checks for it before
+            // falling back to the stored active instance.
+            let initial_path = match &initial_deep_link {
+                Some(url) => format!("index.html?deeplink={}", encode_deep_link_param(url)),
+                None => "index.html".to_string(),
+            };
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(initial_path.into()))
                 .title("Sovereign")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(480.0, 360.0)
