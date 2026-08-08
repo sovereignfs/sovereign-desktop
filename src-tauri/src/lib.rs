@@ -8,10 +8,13 @@
 
 mod bridge;
 
-use tauri::menu::{Menu, MenuItem, Submenu};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const SWITCH_INSTANCE_MENU_ID: &str = "switch-instance";
+const TRAY_OPEN_MENU_ID: &str = "tray-open";
+const TRAY_QUIT_MENU_ID: &str = "tray-quit";
 
 /// Must match `@sovereignfs/bridge`'s `PROTOCOL_VERSION` constant
 /// (`packages/bridge/src/protocol.ts` in the `sovereign` monorepo) — a
@@ -106,10 +109,27 @@ fn open_instance_manager<R: Runtime>(app: &AppHandle<R>) {
     let Some(webview) = app.get_webview_window("main") else {
         return;
     };
+    show_window(&webview);
     let url = format!("{}/?manage=1", app_origin());
     if let Ok(url) = url.parse() {
         let _ = webview.navigate(url);
     }
+}
+
+/// Restores the main window from the tray-hidden state (see `run()`'s
+/// `CloseRequested` handler) — used by both the tray's "Open" item and the
+/// app-menu's "Switch Instance…", since the latter is reachable from the
+/// macOS menu bar even while the window is hidden.
+fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(webview) = app.get_webview_window("main") {
+        show_window(&webview);
+    }
+}
+
+fn show_window<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -124,13 +144,28 @@ pub fn run() {
             // carry the shell-detection and device-bridge initialization
             // scripts. Both run on every navigation, so they're present on the
             // loaded instance too, not just the bundled onboarding page.
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Sovereign")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(480.0, 360.0)
                 .initialization_script(&desktop_marker_script())
                 .initialization_script(&bridge_script())
                 .build()?;
+
+            // Closing the window hides it instead of quitting the app — Sovereign
+            // keeps running in the tray so notifications and the bridge stay live.
+            // `prevent_close()` stops the window (and thus the app) from actually
+            // tearing down; "Quit" on the tray menu or the app menu's Cmd+Q are the
+            // only ways to fully exit.
+            window.on_window_event({
+                let window = window.clone();
+                move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            });
 
             // Start from the default menu so the standard app/Edit/Window items
             // survive — without an Edit menu, copy/paste shortcuts do not work
@@ -146,11 +181,49 @@ pub fn run() {
             let instances = Submenu::with_items(app, "Instances", true, &[&switch_instance])?;
             menu.append(&instances)?;
             app.set_menu(menu)?;
+
+            // System tray — persistent presence so the app is reachable even
+            // while the main window is hidden (see the CloseRequested handler
+            // above). Mirrors the app menu's items rather than introducing new
+            // shell behavior: Open, Switch Instance…, Quit.
+            let tray_open = MenuItem::with_id(app, TRAY_OPEN_MENU_ID, "Open", true, None::<&str>)?;
+            let tray_switch_instance = MenuItem::with_id(
+                app,
+                SWITCH_INSTANCE_MENU_ID,
+                "Switch Instance…",
+                true,
+                None::<&str>,
+            )?;
+            let tray_quit = MenuItem::with_id(app, TRAY_QUIT_MENU_ID, "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &tray_open,
+                    &tray_switch_instance,
+                    &PredefinedMenuItem::separator(app)?,
+                    &tray_quit,
+                ],
+            )?;
+            let tray_icon = app
+                .default_window_icon()
+                .cloned()
+                .ok_or("missing default window icon for tray")?;
+            TrayIconBuilder::new()
+                .icon(tray_icon)
+                .menu(&tray_menu)
+                .show_menu_on_left_click(true)
+                .tooltip("Sovereign")
+                .build(app)?;
+
             Ok(())
         })
         .on_menu_event(|app, event| {
             if event.id() == SWITCH_INSTANCE_MENU_ID {
                 open_instance_manager(app);
+            } else if event.id() == TRAY_OPEN_MENU_ID {
+                show_main_window(app);
+            } else if event.id() == TRAY_QUIT_MENU_ID {
+                app.exit(0);
             }
         })
         .run(tauri::generate_context!())
