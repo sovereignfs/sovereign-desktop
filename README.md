@@ -22,6 +22,10 @@ On launch, enter your instance URL (e.g. `my.sovereign.example`). The app checks
 it is a reachable Sovereign instance, then loads it. Use
 **Instances → Switch Instance…** (⌘⇧I) to add, switch, or remove instances.
 
+Sovereign runs from a tray/menu-bar icon: closing the window hides it rather
+than quitting the app, so it stays reachable for notifications. Use the tray
+icon's **Open** to bring the window back, or **Quit** to fully exit.
+
 ## Detecting the desktop shell
 
 The shell injects a frozen marker into every page it loads — including your

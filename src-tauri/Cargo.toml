@@ -1,6 +1,6 @@
 [package]
 name = "sovereign-desktop"
-version = "0.3.0"
+version = "0.4.0"
 description = "Sovereign desktop shell — loads your self-hosted Sovereign instance"
 authors = ["Sovereign contributors"]
 license = "AGPL-3.0-or-later"
@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-http = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
