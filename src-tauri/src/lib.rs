@@ -10,6 +10,7 @@ mod bridge;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_store::StoreExt;
@@ -149,6 +150,23 @@ fn allow_navigation<R: Runtime>(app: &AppHandle<R>, url: &url::Url) -> bool {
     }
     let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
     false
+}
+
+/// `window.open()` / `target="_blank"` requests go through a *separate* Tauri
+/// hook from `on_navigation` above — without registering this one too, such
+/// requests silently no-op (Tauri/WRY's own default with nothing configured)
+/// rather than following the same policy. Reuses `is_allowed_navigation`
+/// directly: same-origin gets a real new window (`Allow`, Tauri's default
+/// handling), anything else is denied and reopened in the system browser
+/// instead — the same outcome `allow_navigation` reaches for a plain
+/// cross-origin link, just via this hook's own response type.
+fn handle_new_window_request<R: Runtime>(app: &AppHandle<R>, url: &url::Url) -> NewWindowResponse<R> {
+    let active = active_instance_origin(app);
+    if is_allowed_navigation(url, active.as_ref()) {
+        return NewWindowResponse::Allow;
+    }
+    let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+    NewWindowResponse::Deny
 }
 
 #[cfg(test)]
@@ -325,6 +343,10 @@ pub fn run() {
                 .on_navigation({
                     let app_handle = app.handle().clone();
                     move |url| allow_navigation(&app_handle, url)
+                })
+                .on_new_window({
+                    let app_handle = app.handle().clone();
+                    move |url, _features| handle_new_window_request(&app_handle, &url)
                 })
                 .build()?;
 
