@@ -125,6 +125,40 @@ capability grants to the loaded instance's origin.
   one-shot `show`. The OS still gates the real permission when `show()`
   actually runs; that outcome surfaces through `show()`'s own `DeviceResult`.
 
+### Navigation policy (epic task 17.8, RFC 0058)
+
+`WebviewWindowBuilder::on_navigation` (Tauri's equivalent of iOS's
+`decidePolicyFor` / Android's `shouldOverrideUrlLoading`) decides same-origin
+(allow, stays in the WebView) vs. everything else (deny, reopen via
+`tauri_plugin_opener::open_url` — the system default browser) on every
+top-level navigation. `is_allowed_navigation` in `lib.rs` is the pure decision
+function (unit-tested); `allow_navigation` wraps it with the actual side
+effect. "Same-origin" means the loaded instance's own active origin — read
+directly from `tauri-plugin-store`'s `instances.json` (`activeUrl` key) via
+its Rust API, the exact store `src/store.ts` already writes, so there's one
+source of truth. Mirrors mobile's ADR 0007, extending its RFC 0058
+requirement to desktop (RFC 0038 never carried it over — see epic task 17.8's
+own note in the monorepo). Does **not** cover `window.open()` /
+`target="_blank"`, a separate Tauri hook (`on_new_window`) — currently a
+known no-op without it, safe but incomplete; see the epic task.
+
+### Deep links (`sovereign://`, epic task 17.3, RFC 0038)
+
+Registered via `tauri.conf.json`'s `plugins.deep-link.desktop.schemes`
+(verify with `plutil -p .../Info.plist` after `pnpm build` — look for
+`CFBundleURLTypes`). All resolution happens in TypeScript, not Rust: the
+`tauri-plugin-deep-link` event (`deep-link://new-url`) has a documented race
+on macOS where it can arrive after this app's own `setup()`, so `lib.rs`
+never tries to resolve the link itself — it unconditionally forces the
+webview back to the local page with the raw URL attached as `?deeplink=`
+(cold launch via `get_current()`, warm via `on_open_url`), and `main.ts` /
+`src/deep-link.ts` do the actual host-matching against the stored instance
+list. No `@tauri-apps/plugin-deep-link` JS dependency and no new
+capability/permission grant, since no JS-side plugin command is ever called.
+**Known limitation:** Windows/Linux have no single-instance plugin yet, so a
+link click while already running opens a second OS process instead of
+routing to the existing window.
+
 ## Conventions
 
 Carried over from the `sovereign` monorepo:
@@ -165,12 +199,15 @@ pnpm lint           # eslint
 pnpm lint:fix       # eslint --fix
 pnpm format         # prettier --write
 pnpm format:check   # prettier --check (CI)
+
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests (pure helpers, e.g. navigation policy)
 ```
 
-CI (`.github/workflows/ci.yml`) runs format:check, lint, typecheck, test, and
-`cargo check` on every push/PR. Releases (`release.yml`) run on `v*` tags and
-attach `.dmg`/`.msi`/`.exe`/`.AppImage`/`.deb` to a draft GitHub Release; macOS
-signing/notarization activates when the `APPLE_*` secrets are set (see README).
+CI (`.github/workflows/ci.yml`) runs format:check, lint, typecheck, test,
+`cargo check`, and `cargo test` on every push/PR. Releases (`release.yml`) run
+on `v*` tags and attach `.dmg`/`.msi`/`.exe`/`.AppImage`/`.deb` to a draft
+GitHub Release; macOS signing/notarization activates when the `APPLE_*`
+secrets are set (see README).
 
 ## Testing against a local instance
 
@@ -180,8 +217,10 @@ explicitly (LAN/dev instances); bare input defaults to `https://`.
 
 ## Post-v1 roadmap (do not implement ahead of assignment)
 
-Epic 17 in the monorepo sequences the follow-ups: 17.2 system tray + OS
-notifications, 17.3 `sovereign://` deep links, 17.4 keychain credential storage,
-17.5 auto-updater, 17.6 Mac App Store distribution, 17.7 SDK `"desktop"`
-environment (`sdk.device.*` — lands in the monorepo, not here). Tasks are
-assigned by the developer at session start — do not infer the next one.
+Epic 17 in the monorepo sequences this repo's work. Shipped: 17.1 shell
+scaffold, 17.2 system tray + OS notifications, 17.3 `sovereign://` deep
+links, 17.8 navigation policy enforcement. Remaining: 17.4 keychain credential
+storage, 17.5 auto-updater, 17.6 Mac App Store distribution, 17.7 SDK
+`"desktop"` environment (`sdk.device.*` — lands in the monorepo, not here).
+Tasks are assigned by the developer at session start — do not infer the next
+one.
