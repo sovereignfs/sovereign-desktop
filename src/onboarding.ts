@@ -33,7 +33,22 @@ function loadInstance(url: string): void {
   window.location.replace(url);
 }
 
-export async function renderOnboarding(root: HTMLElement): Promise<void> {
+export interface OnboardingOptions {
+  /**
+   * Pre-fill the URL field — used when a `sovereign://` deep link targets an
+   * instance that isn't stored yet.
+   */
+  prefillUrl?: string;
+  /** Path (+ query/hash) to open once the pre-filled instance is added. */
+  pendingPath?: string;
+}
+
+export async function renderOnboarding(
+  root: HTMLElement,
+  options: OnboardingOptions = {},
+): Promise<void> {
+  const { prefillUrl, pendingPath } = options;
+  const prefillHost = prefillUrl ? new URL(prefillUrl).hostname : null;
   const instances = await listInstances();
   const firstLaunch = instances.length === 0;
 
@@ -41,9 +56,11 @@ export async function renderOnboarding(root: HTMLElement): Promise<void> {
     <div class="onboarding">
       <h1>Sovereign</h1>
       <p class="subtitle">${
-        firstLaunch
-          ? 'Connect to your self-hosted Sovereign instance.'
-          : 'Choose an instance, or add another one.'
+        prefillUrl
+          ? "This link is for an instance you haven't added yet."
+          : firstLaunch
+            ? 'Connect to your self-hosted Sovereign instance.'
+            : 'Choose an instance, or add another one.'
       }</p>
       <ul class="instance-list" aria-label="Your instances"></ul>
       <form class="add-form" novalidate>
@@ -72,6 +89,8 @@ export async function renderOnboarding(root: HTMLElement): Promise<void> {
   const error = root.querySelector<HTMLParagraphElement>('.form-error');
   const submit = root.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (!list || !form || !input || !error || !submit) return;
+
+  if (prefillUrl) input.value = prefillUrl;
 
   for (const instance of instances) {
     const item = document.createElement('li');
@@ -127,7 +146,11 @@ export async function renderOnboarding(root: HTMLElement): Promise<void> {
       }
 
       await addInstance({ url: origin, label: info.instanceName, addedAt: Date.now() });
-      loadInstance(origin);
+      // Only resume the deep link's path when the submitted URL still points at
+      // the host it was pre-filled for — if the user edited it to a different
+      // instance, that path was never meant for it.
+      const resumePath = pendingPath && new URL(origin).hostname === prefillHost ? pendingPath : '';
+      loadInstance(origin + resumePath);
     })();
   });
 

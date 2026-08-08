@@ -26,6 +26,14 @@ Sovereign runs from a tray/menu-bar icon: closing the window hides it rather
 than quitting the app, so it stays reachable for notifications. Use the tray
 icon's **Open** to bring the window back, or **Quit** to fully exit.
 
+Sovereign also registers the `sovereign://` URL scheme. A link like
+`sovereign://my.instance.example/plugins/console` opens the app and navigates
+straight to `/plugins/console` on that instance; if it isn't one of your
+stored instances yet, the app prompts you to add it first. On Windows/Linux,
+clicking a `sovereign://` link while the app is already running currently
+opens a second instance of the app rather than routing to the existing
+window — a known limitation of not yet bundling the single-instance plugin.
+
 ## Detecting the desktop shell
 
 The shell injects a frozen marker into every page it loads — including your
