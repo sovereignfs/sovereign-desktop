@@ -12,6 +12,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_store::StoreExt;
 
 const SWITCH_INSTANCE_MENU_ID: &str = "switch-instance";
 const TRAY_OPEN_MENU_ID: &str = "tray-open";
@@ -103,6 +104,108 @@ fn app_origin() -> &'static str {
         "http://tauri.localhost"
     } else {
         "tauri://localhost"
+    }
+}
+
+/// Must match `src/store.ts`'s `STORE_FILE` / `KEY_ACTIVE_URL` — this reads
+/// the exact same `tauri-plugin-store` store the TS shell already persists
+/// the active instance to, rather than keeping a separate Rust-side copy in
+/// sync. Mirrors how mobile's ADR 0007 reads its own native store directly
+/// for the same reason.
+fn active_instance_origin<R: Runtime>(app: &AppHandle<R>) -> Option<url::Url> {
+    let store = app.store("instances.json").ok()?;
+    let active_url = store.get("activeUrl")?;
+    url::Url::parse(active_url.as_str()?).ok()
+}
+
+fn is_local_origin(url: &url::Url) -> bool {
+    url::Url::parse(app_origin())
+        .map(|local| local.origin() == url.origin())
+        .unwrap_or(false)
+}
+
+/// The navigation-policy decision itself (epic task 17.8, desktop's
+/// counterpart to mobile's ADR 0007 / RFC 0058): the bundled local page is
+/// always allowed, a navigation to the currently active instance's own
+/// origin is allowed, everything else is denied. Kept as a pure function,
+/// separate from `allow_navigation`'s side effect of actually opening a
+/// denied URL externally, so it's unit-testable without spawning a real
+/// browser process.
+fn is_allowed_navigation(url: &url::Url, active_instance: Option<&url::Url>) -> bool {
+    is_local_origin(url) || matches!(active_instance, Some(active) if active.origin() == url.origin())
+}
+
+/// Registered via `WebviewWindowBuilder::on_navigation`, Tauri's equivalent
+/// of iOS's `decidePolicyFor` / Android's `shouldOverrideUrlLoading` — fires
+/// for top-level document navigations only (link clicks, redirects, form
+/// submits), never for subresource loads like images, scripts, or fetches,
+/// so normal instance functionality is unaffected. A denied navigation opens
+/// in the system browser instead of silently taking over the shell's
+/// WebView.
+fn allow_navigation<R: Runtime>(app: &AppHandle<R>, url: &url::Url) -> bool {
+    let active = active_instance_origin(app);
+    if is_allowed_navigation(url, active.as_ref()) {
+        return true;
+    }
+    let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(s: &str) -> url::Url {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn allows_the_bundled_local_page_regardless_of_active_instance() {
+        let local = url(&format!("{}/?manage=1", app_origin()));
+        assert!(is_allowed_navigation(&local, None));
+        assert!(is_allowed_navigation(
+            &local,
+            Some(&url("https://my.sovereign.example"))
+        ));
+    }
+
+    #[test]
+    fn allows_navigation_matching_the_active_instance_origin() {
+        let active = url("https://my.sovereign.example");
+        let target = url("https://my.sovereign.example/plugins/console");
+        assert!(is_allowed_navigation(&target, Some(&active)));
+    }
+
+    #[test]
+    fn denies_a_different_origin_than_the_active_instance() {
+        let active = url("https://my.sovereign.example");
+        let elsewhere = url("https://evil.example/phish");
+        assert!(!is_allowed_navigation(&elsewhere, Some(&active)));
+    }
+
+    #[test]
+    fn denies_everything_non_local_when_no_instance_is_active() {
+        let target = url("https://anywhere.example");
+        assert!(!is_allowed_navigation(&target, None));
+    }
+
+    #[test]
+    fn matches_the_active_origin_regardless_of_path() {
+        // Same origin, different path/query/fragment on the active instance
+        // — e.g. clicking around inside the loaded instance — stays allowed.
+        let active = url("https://my.sovereign.example");
+        assert!(is_allowed_navigation(
+            &url("https://my.sovereign.example/search?q=x#top"),
+            Some(&active)
+        ));
+    }
+
+    #[test]
+    fn treats_a_different_port_on_the_same_host_as_a_different_origin() {
+        // Matters for local dev instances (http://localhost:3000 etc.) —
+        // origin comparison must include the port, not just the hostname.
+        let active = url("http://localhost:3000");
+        assert!(!is_allowed_navigation(&url("http://localhost:4000"), Some(&active)));
     }
 }
 
@@ -219,6 +322,10 @@ pub fn run() {
                 .min_inner_size(480.0, 360.0)
                 .initialization_script(&desktop_marker_script())
                 .initialization_script(&bridge_script())
+                .on_navigation({
+                    let app_handle = app.handle().clone();
+                    move |url| allow_navigation(&app_handle, url)
+                })
                 .build()?;
 
             // Closing the window hides it instead of quitting the app — Sovereign
