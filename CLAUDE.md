@@ -138,9 +138,12 @@ directly from `tauri-plugin-store`'s `instances.json` (`activeUrl` key) via
 its Rust API, the exact store `src/store.ts` already writes, so there's one
 source of truth. Mirrors mobile's ADR 0007, extending its RFC 0058
 requirement to desktop (RFC 0038 never carried it over — see epic task 17.8's
-own note in the monorepo). Does **not** cover `window.open()` /
-`target="_blank"`, a separate Tauri hook (`on_new_window`) — currently a
-known no-op without it, safe but incomplete; see the epic task.
+own note in the monorepo). `window.open()` / `target="_blank"` requests go
+through a _separate_ Tauri hook, `on_new_window` — also registered, reusing
+the same `is_allowed_navigation` decision: same-origin gets a real new
+window (`NewWindowResponse::Allow`), anything else is denied and reopened in
+the system browser instead, same outcome as `allow_navigation` reaches for a
+plain link.
 
 ### Deep links (`sovereign://`, epic task 17.3, RFC 0038)
 
