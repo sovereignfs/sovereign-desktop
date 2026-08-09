@@ -1,6 +1,6 @@
 [package]
 name = "sovereign-desktop"
-version = "0.10.1"
+version = "0.11.0"
 description = "Sovereign desktop shell — loads your self-hosted Sovereign instance"
 authors = ["Sovereign contributors"]
 license = "AGPL-3.0-or-later"
@@ -30,6 +30,17 @@ serde_json = "1"
 url = "2"
 base64 = "0.22"
 
+# Native push (RFC 0087's "Desktop native push" addendum, workstream 0010
+# leg 3): on-device P-256 keypair + ECDH/HKDF/AES-256-GCM decrypt, matching
+# sovereign-mobile leg 4's wire format exactly (same 65-byte SEC1/X9.63
+# public-key point, same primitives) — cross-platform, no OS gating needed
+# for the crypto itself, only for key *storage* (see below).
+p256 = { version = "0.13", features = ["ecdh"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+
 # biometrics.confirm (epic task 17.10): no Tauri plugin covers desktop —
 # tauri-plugin-biometric's own README lists macOS/Windows/Linux all
 # unsupported (mobile-only) — so this goes straight to each OS's native
@@ -42,6 +53,21 @@ objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-local-authentication = { version = "0.3", features = ["block2", "LAContext", "LAError"] }
 block2 = "0.6"
+# Native push (workstream 0010 leg 3): NSApplication.registerForRemoteNotifications()
+# and the delegate-method injection spike — see src/push/macos.rs.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication"] }
+# Keychain storage for the push encryption private key — see src/push/keystore/macos.rs.
+security-framework = "3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.58", features = ["Security_Credentials_UI"] }
+windows = { version = "0.58", features = [
+  "Security_Credentials_UI",
+  # Native push (workstream 0010 leg 3): PushNotificationChannelManager
+  # (src/push/windows.rs) and Credential Manager storage for the push
+  # encryption private key (src/push/keystore/windows.rs). Cross-compile
+  # type-checked only, same posture as biometrics.confirm's Windows Hello
+  # code above — see this crate's own doc comments.
+  "Networking_PushNotifications",
+  "Win32_Security_Credentials",
+  "Win32_Foundation",
+] }

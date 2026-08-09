@@ -266,9 +266,71 @@ Epic 17 in the monorepo sequences this repo's work. Shipped: 17.1 shell
 scaffold, 17.2 system tray + OS notifications, 17.3 `sovereign://` deep
 links, 17.5 auto-updater (mechanism shipped; see its section above — signing
 key setup is a separate, manual activation step, not code), 17.8 navigation
-policy enforcement. Remaining: 17.4 keychain credential storage — **blocked**,
+policy enforcement, 17.11 native push notifications (macOS APNs, Windows
+WNS raw-only — RFC 0087's "Desktop native push" addendum, workstream 0010
+leg 3; see "Native push" below). Remaining: 17.4 keychain credential
+storage — **blocked**,
 see [RFC 0072's addendum](https://github.com/sovereignfs/sovereign/blob/main/docs/rfcs/0072-external-oauth-provider.md#addendum-well-known-first-party-client-for-official-native-shells)
 in the monorepo before picking this up, 17.6 Mac App Store distribution,
 17.7 SDK `"desktop"` environment (`sdk.device.*` — lands in the monorepo,
 not here). Tasks are assigned by the developer at session start — do not
 infer the next one.
+
+### Native push (epic task 17.11, RFC 0087's "Desktop native push" addendum)
+
+`src-tauri/src/push/` — on-device P-256 keypair (`p256`/`aes-gcm`/`hkdf`
+crates, matching `sovereign-mobile`'s exact wire format: same 65-byte
+SEC1/X9.63 point, same ECDH+HKDF-SHA256+AES-256-GCM scheme, verified via a
+real cross-language round-trip — Node encrypts using the actual
+server-side algorithm, Rust decrypts using only the retained private key,
+not a same-process round-trip), persisted via each OS's native credential
+store (macOS Keychain via `security-framework`, real-Keychain-tested on
+this repo's dev machine; Windows Credential Manager via the `windows`
+crate, cross-compile-type-checked only — see below). Registration is
+entirely native, not the bundled onboarding page's JS and not routed
+through `bridge.json`'s remote grant — same two reasons as the rest of
+this file's "Hard rules": RFC 0083 §7 and the rule against widening
+`bridge.json`'s remote grant.
+
+- **macOS** (`src/push/macos.rs`) needs
+  `NSApplication.registerForRemoteNotifications()` plus the
+  `NSApplicationDelegate` device-token callbacks — callbacks Tauri/`tao`
+  don't surface, since `tao` already owns the single `NSApplication`
+  delegate slot for its own window-lifecycle handling. Solved by adding
+  the selectors to `tao`'s existing delegate class at runtime via the
+  Objective-C runtime (`objc2::ffi::class_addMethod`) — not a novel trick,
+  Electron solves the identical problem the same way. **Empirically
+  verified working**, not just believed to compile: a real `tauri build
+--debug` bundle (a bare `cargo build` binary has no Info.plist/bundle
+  identity and never receives any delegate callback regardless of whether
+  the injection is correct) reliably drives the injected failure callback
+  with a real `NSError`, confirming the injection mechanism, selector
+  registration, and type encoding are all correct. The success path is
+  verified structurally and by symmetry, not end-to-end — this dev
+  machine has no real Apple Developer Team / push entitlement (ad-hoc
+  "Sign to Run Locally" signing strips `Entitlements.plist`'s
+  `aps-environment` the same way it stripped `sovereign-mobile`'s Keychain
+  access groups). No Notification Service Extension equivalent ships —
+  Tauri has no tooling to embed one — so a quit app shows a generic
+  placeholder banner; real content decrypts and displays (via the same
+  `notifications.native` path task 17.2 already ships) whenever the
+  process is alive, through the same injection mechanism's third selector,
+  `application:didReceiveRemoteNotification:`.
+- **Windows** (`src/push/windows.rs`,
+  `src/push/keystore/windows.rs`) uses WinRT's
+  `PushNotificationChannelManager` — a real, official event-subscription
+  API, no delegate-injection trick needed. Raw notifications only
+  (`PushNotificationReceived`'s `RawNotification`, not toast) — this
+  reaches a running (tray-resident is sufficient) process, never a
+  fully-quit one, the deliberate tradeoff RFC 0087's addendum documents
+  for preserving end-to-end encryption on Windows. **Written but
+  cross-compile-type-checked only**, verified against an isolated probe
+  crate exercising this exact API surface (channel creation, event
+  subscription, `RawNotification::Content()`, `CredWriteW`/`CredReadW`) —
+  the full binary can't be cross-checked here, the same pre-existing `ring`
+  Windows-C-headers blocker already documented for `src/biometrics/windows.rs`.
+  Do not treat this as more verified than that until someone builds and
+  runs it on real Windows.
+- **Linux** gets no new capability from this task — no OS push primitive
+  exists at all, a permanent gap per the RFC addendum, not a deferred
+  piece of this task.

@@ -8,6 +8,7 @@
 
 mod biometrics;
 mod bridge;
+mod push;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
@@ -135,7 +136,7 @@ fn app_origin() -> &'static str {
 /// the active instance to, rather than keeping a separate Rust-side copy in
 /// sync. Mirrors how mobile's ADR 0007 reads its own native store directly
 /// for the same reason.
-fn active_instance_origin<R: Runtime>(app: &AppHandle<R>) -> Option<url::Url> {
+pub(crate) fn active_instance_origin<R: Runtime>(app: &AppHandle<R>) -> Option<url::Url> {
     let store = app.store("instances.json").ok()?;
     let active_url = store.get("activeUrl")?;
     url::Url::parse(active_url.as_str()?).ok()
@@ -371,6 +372,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![bridge::bridge_invoke])
         .setup(|app| {
+            // Native push (workstream 0010 leg 3), run first per this
+            // leg's own workstream doc and before window creation since it
+            // doesn't depend on it (tao's NSApplicationDelegate is already
+            // set by this point).
+            #[cfg(target_os = "macos")]
+            push::macos::setup(&app.handle().clone());
+            #[cfg(target_os = "windows")]
+            push::windows::setup(&app.handle().clone());
+
             // On Windows/Linux, `sovereign://...` launches a *new* OS process with
             // the URL as its only CLI argument — the deep-link plugin parses that
             // during its own setup, which runs before this closure, so it's already
