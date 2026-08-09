@@ -111,9 +111,13 @@ capability grants to the loaded instance's origin.
   — the plugin's own JS-side `guest-js` for `requestPermission`/
   `sendNotification` just calls the standard Notification API directly,
   which may not even exist in WKWebView; going through `NotificationExt`
-  sidesteps that entirely). `haptics.impact` is a deliberate no-op — falling
-  through to `unavailable` — per RFC 0083 §7's own table for this transport;
-  do not add a fake implementation to "complete" the capability list.
+  sidesteps that entirely) and `camera.photo` (native file picker via
+  `tauri-plugin-dialog`'s `DialogExt`, **file-picker only — never live
+  webcam capture**; the `source: 'camera' | 'library'` field the SDK sends
+  is intentionally ignored, since desktop has no equivalent "camera" mode to
+  route to). `haptics.impact` is a deliberate no-op — falling through to
+  `unavailable` — per RFC 0083 §7's own table for this transport; do not add
+  a fake implementation to "complete" the capability list.
 - **Adding a new bridge capability means adding to all three places in
   lockstep**: the `capabilities` array in `bridge_script()` (`lib.rs`), the
   `match` in `bridge_invoke` (`bridge.rs`), and — if it needs new native
