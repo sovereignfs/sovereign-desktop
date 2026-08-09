@@ -30,11 +30,12 @@ const BRIDGE_PROTOCOL_VERSION: u32 = 1;
 
 /// JavaScript injected into every page load — including the loaded instance —
 /// defining `window.__SOVEREIGN_BRIDGE__` per `@sovereignfs/bridge`'s
-/// `InstalledBridge` wire shape (`packages/bridge/src/protocol.ts`). Only
-/// `notifications.native` is advertised — `haptics.impact` is a deliberate
-/// Tauri no-op per RFC 0083 §7, so omitting it here lets the page-side
-/// bridge's own "no native shell answers this" path report `unavailable`,
-/// exactly like a plain browser with no Vibration API.
+/// `InstalledBridge` wire shape (`packages/bridge/src/protocol.ts`).
+/// `notifications.native` and `camera.photo` are advertised —
+/// `haptics.impact` is a deliberate Tauri no-op per RFC 0083 §7, so omitting
+/// it here lets the page-side bridge's own "no native shell answers this"
+/// path report `unavailable`, exactly like a plain browser with no
+/// Vibration API.
 ///
 /// `invoke()` calls the low-level `window.__TAURI_INTERNALS__.invoke(...)` —
 /// not `@tauri-apps/api`'s `invoke` wrapper, since this script is a raw
@@ -50,7 +51,7 @@ fn bridge_script() -> String {
              value: Object.freeze({{ \
                  protocolVersion: {protocol_version}, \
                  shell: Object.freeze({{ name: 'sovereign-desktop', version: '{version}', platform: '{platform}' }}), \
-                 capabilities: [{{ name: 'notifications.native', version: 1 }}], \
+                 capabilities: [{{ name: 'notifications.native', version: 1 }}, {{ name: 'camera.photo', version: 1 }}], \
                  invoke: function (capability, payload) {{ \
                      return window.__TAURI_INTERNALS__.invoke('bridge_invoke', {{ capability: capability, payload: payload }}); \
                  }} \
