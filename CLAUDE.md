@@ -127,7 +127,7 @@ capability grants to the loaded instance's origin.
   `haptics.impact` is omitted everywhere: don't advertise a capability that
   would always resolve `unavailable`. **Windows support is written but
   unverified beyond a cross-compile type-check** (`cargo check --target
-  x86_64-pc-windows-msvc`) — this repo's CI does not have a Windows runner
+x86_64-pc-windows-msvc`) — this repo's CI does not have a Windows runner
   or Windows-C-toolchain access; the full binary can't even be
   cross-compiled here (an unrelated pre-existing dependency, `ring`, needs
   Windows C headers this machine doesn't have). Do not treat
