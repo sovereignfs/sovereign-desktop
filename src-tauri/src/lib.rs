@@ -6,6 +6,7 @@
 //! its "Switch Instance…" handler, the shell-detection marker injected into
 //! every page, and (RFC 0083, workstream 0003 leg 3) the device bridge.
 
+mod biometrics;
 mod bridge;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -31,11 +32,15 @@ const BRIDGE_PROTOCOL_VERSION: u32 = 1;
 /// JavaScript injected into every page load — including the loaded instance —
 /// defining `window.__SOVEREIGN_BRIDGE__` per `@sovereignfs/bridge`'s
 /// `InstalledBridge` wire shape (`packages/bridge/src/protocol.ts`).
-/// `notifications.native` and `camera.photo` are advertised —
-/// `haptics.impact` is a deliberate Tauri no-op per RFC 0083 §7, so omitting
-/// it here lets the page-side bridge's own "no native shell answers this"
-/// path report `unavailable`, exactly like a plain browser with no
-/// Vibration API.
+/// `notifications.native` and `camera.photo` are advertised
+/// unconditionally; `biometrics.confirm` only on macOS/Windows builds (see
+/// `capabilities_list()`) — `haptics.impact` is a deliberate Tauri no-op per
+/// RFC 0083 §7, so omitting it here lets the page-side bridge's own "no
+/// native shell answers this" path report `unavailable`, exactly like a
+/// plain browser with no Vibration API. `biometrics.confirm` on Linux
+/// follows the same reasoning: there is no standard OS biometric primitive
+/// there (`crate::biometrics`'s doc comment), so it is omitted rather than
+/// advertised-then-always-`unavailable`.
 ///
 /// `invoke()` calls the low-level `window.__TAURI_INTERNALS__.invoke(...)` —
 /// not `@tauri-apps/api`'s `invoke` wrapper, since this script is a raw
@@ -51,7 +56,7 @@ fn bridge_script() -> String {
              value: Object.freeze({{ \
                  protocolVersion: {protocol_version}, \
                  shell: Object.freeze({{ name: 'sovereign-desktop', version: '{version}', platform: '{platform}' }}), \
-                 capabilities: [{{ name: 'notifications.native', version: 1 }}, {{ name: 'camera.photo', version: 1 }}], \
+                 capabilities: [{capabilities}], \
                  invoke: function (capability, payload) {{ \
                      return window.__TAURI_INTERNALS__.invoke('bridge_invoke', {{ capability: capability, payload: payload }}); \
                  }} \
@@ -61,7 +66,21 @@ fn bridge_script() -> String {
         protocol_version = BRIDGE_PROTOCOL_VERSION,
         version = env!("CARGO_PKG_VERSION"),
         platform = tauri_platform_name(),
+        capabilities = capabilities_list(),
     )
+}
+
+/// The `capabilities` array's contents, built at compile time per-platform
+/// rather than hand-duplicated across `#[cfg]` branches of `bridge_script()`
+/// itself — `biometrics.confirm` is the only entry that varies (macOS and
+/// Windows only; see this file's and `crate::biometrics`'s doc comments for
+/// why Linux is excluded).
+fn capabilities_list() -> &'static str {
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
+        "{ name: 'notifications.native', version: 1 }, { name: 'camera.photo', version: 1 }, { name: 'biometrics.confirm', version: 1 }"
+    } else {
+        "{ name: 'notifications.native', version: 1 }, { name: 'camera.photo', version: 1 }"
+    }
 }
 
 /// `BridgeHandshake['shell']['platform']` values are `'ios' | 'android' |
