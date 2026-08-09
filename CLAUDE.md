@@ -115,14 +115,30 @@ capability grants to the loaded instance's origin.
   `tauri-plugin-dialog`'s `DialogExt`, **file-picker only — never live
   webcam capture**; the `source: 'camera' | 'library'` field the SDK sends
   is intentionally ignored, since desktop has no equivalent "camera" mode to
-  route to). `haptics.impact` is a deliberate no-op — falling through to
+  route to) and `biometrics.confirm` (epic task 17.10 — `crate::biometrics`,
+  Touch ID/Windows Hello called directly via `objc2-local-authentication`/
+  the `windows` crate, since no Tauri plugin covers desktop biometrics at
+  all). `haptics.impact` is a deliberate no-op — falling through to
   `unavailable` — per RFC 0083 §7's own table for this transport; do not add
   a fake implementation to "complete" the capability list.
+- **`biometrics.confirm` is macOS/Windows only — conditionally advertised,
+  not a flat capability list.** `lib.rs`'s `capabilities_list()` omits it on
+  Linux (no standard OS biometric primitive exists there) the same way
+  `haptics.impact` is omitted everywhere: don't advertise a capability that
+  would always resolve `unavailable`. **Windows support is written but
+  unverified beyond a cross-compile type-check** (`cargo check --target
+  x86_64-pc-windows-msvc`) — this repo's CI does not have a Windows runner
+  or Windows-C-toolchain access; the full binary can't even be
+  cross-compiled here (an unrelated pre-existing dependency, `ring`, needs
+  Windows C headers this machine doesn't have). Do not treat
+  `src/biometrics/windows.rs` as more verified than that until someone
+  builds and runs it on real Windows.
 - **Adding a new bridge capability means adding to all three places in
-  lockstep**: the `capabilities` array in `bridge_script()` (`lib.rs`), the
-  `match` in `bridge_invoke` (`bridge.rs`), and — if it needs new native
-  access `allow-bridge-invoke` doesn't already cover — a new permission file
-  under `permissions/` referenced from `bridge.json`.
+  lockstep**: the `capabilities` array in `bridge_script()`/
+  `capabilities_list()` (`lib.rs`), the `match` in `bridge_invoke`
+  (`bridge.rs`), and — if it needs new native access `allow-bridge-invoke`
+  doesn't already cover — a new permission file under `permissions/`
+  referenced from `bridge.json`.
 - `getPermission()`/`requestPermission()` on this transport report `'granted'`
   unconditionally (SDK-side, `packages/sdk/src/device-client.ts` in the
   monorepo) — there is no bridge action for a permission pre-check, only the

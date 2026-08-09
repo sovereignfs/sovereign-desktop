@@ -5,13 +5,14 @@
 //! `tauri-plugin-notification`'s `NotificationExt`, not a `window.Notification`
 //! shim — see this leg's PR description for why that distinction mattered.
 //!
-//! v1 implements `notifications.native` and `camera.photo`. `haptics.impact`
-//! is deliberately absent from both the advertised `capabilities` list and
-//! this dispatch — RFC 0083 §7 specifies it as a Tauri no-op (`unavailable`),
-//! so omitting it here lets `@sovereignfs/bridge`'s own "no native shell
-//! answers this capability" path handle it, exactly as it already does for a
-//! plain browser with no Vibration API. Advertising a capability this
-//! transport cannot honor would be worse than omitting it.
+//! v1 implements `notifications.native`, `camera.photo`, and
+//! `biometrics.confirm`. `haptics.impact` is deliberately absent from both
+//! the advertised `capabilities` list and this dispatch — RFC 0083 §7
+//! specifies it as a Tauri no-op (`unavailable`), so omitting it here lets
+//! `@sovereignfs/bridge`'s own "no native shell answers this capability"
+//! path handle it, exactly as it already does for a plain browser with no
+//! Vibration API. Advertising a capability this transport cannot honor would
+//! be worse than omitting it.
 //!
 //! **`camera.photo` is a native file picker only — never live webcam
 //! capture.** Desktop hardware makes live capture low-value (most desktops
@@ -25,6 +26,10 @@
 //! 'library'` distinction the SDK sends is intentionally ignored — both
 //! resolve to the same picker, since there is no separate "camera" mode to
 //! route to.
+//!
+//! **`biometrics.confirm` (epic task 17.10) dispatches to `crate::biometrics`
+//! — see that module's doc comment for the macOS/Windows/Linux split and
+//! what is and isn't actually verified on each.**
 
 use base64::prelude::*;
 use serde_json::{json, Value};
@@ -37,19 +42,23 @@ use tauri_plugin_notification::NotificationExt;
 /// union exactly — same four non-`ok` variants, same field names — so the
 /// injected bridge script can hand this straight back to
 /// `BridgeImpl.invoke()`'s caller with no reshaping.
-fn ok(value: Value) -> Value {
+pub(crate) fn ok(value: Value) -> Value {
     json!({ "status": "ok", "value": value })
 }
 
-fn unavailable(capability: &str) -> Value {
+pub(crate) fn unavailable(capability: &str) -> Value {
     json!({ "status": "unavailable", "capability": capability })
 }
 
-fn dismissed() -> Value {
+pub(crate) fn dismissed() -> Value {
     json!({ "status": "dismissed" })
 }
 
-fn failed(error: impl std::fmt::Display) -> Value {
+pub(crate) fn denied() -> Value {
+    json!({ "status": "denied" })
+}
+
+pub(crate) fn failed(error: impl std::fmt::Display) -> Value {
     json!({ "status": "failed", "error": error.to_string() })
 }
 
@@ -57,12 +66,19 @@ fn failed(error: impl std::fmt::Display) -> Value {
 /// per-capability; `notifications.native` uses `{ title: string, body?:
 /// string }`, matching `nativeNotifications.show()`'s input type verbatim.
 /// `camera.photo` uses `{ source: 'camera' | 'library' }`, ignored (see
-/// module doc comment).
+/// module doc comment). `biometrics.confirm` uses `{ reason?: string }`.
 #[tauri::command]
 pub fn bridge_invoke<R: Runtime>(app: AppHandle<R>, capability: String, payload: Value) -> Value {
     match capability.as_str() {
         "notifications.native" => notify(&app, &payload),
         "camera.photo" => camera_photo(&app),
+        "biometrics.confirm" => {
+            let reason = payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("Confirm it's you");
+            crate::biometrics::confirm(reason)
+        }
         _ => unavailable(&capability),
     }
 }
