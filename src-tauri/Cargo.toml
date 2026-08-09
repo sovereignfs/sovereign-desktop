@@ -1,6 +1,6 @@
 [package]
 name = "sovereign-desktop"
-version = "0.10.0"
+version = "0.10.1"
 description = "Sovereign desktop shell — loads your self-hosted Sovereign instance"
 authors = ["Sovereign contributors"]
 license = "AGPL-3.0-or-later"

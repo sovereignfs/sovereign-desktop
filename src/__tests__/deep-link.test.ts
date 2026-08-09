@@ -51,7 +51,14 @@ describe('resolveDeepLink', () => {
     expect(resolveDeepLink('sovereign:///plugins/console', instances)).toBeNull();
   });
 
-  it('rejects garbage that cannot parse as a URL', () => {
+  it('rejects garbage with no sovereign:// prefix', () => {
     expect(resolveDeepLink('not a url', instances)).toBeNull();
+  });
+
+  it('matches the scheme and host case-insensitively', () => {
+    expect(resolveDeepLink('SOVEREIGN://My.Sovereign.Example/plugins/console', instances)).toEqual({
+      origin: 'https://my.sovereign.example',
+      path: '/plugins/console',
+    });
   });
 });
