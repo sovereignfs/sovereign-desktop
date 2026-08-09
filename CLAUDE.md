@@ -162,6 +162,28 @@ capability/permission grant, since no JS-side plugin command is ever called.
 link click while already running opens a second OS process instead of
 routing to the existing window.
 
+### Auto-updater (epic task 17.5)
+
+`check_for_updates` in `lib.rs` runs once per launch (end of `.setup()`),
+via `tauri-plugin-updater`. On an available update it shows a **native**
+dialog (`tauri-plugin-dialog`'s `DialogExt`) — not a WebView banner — since
+the WebView may currently be showing the bundled local page or a loaded
+instance, and shell UI must not touch either. "Update Now" calls
+`Update::download_and_install()` then `AppHandle::restart()`; "Later" (or
+any check failure — no endpoint reachable, no update available, an unset
+placeholder `pubkey`) all resolve identically: nothing happens, silently.
+
+**Ships disabled-but-wired.** `tauri.conf.json`'s `plugins.updater.pubkey`
+is a placeholder (`REPLACE_WITH_YOUR_GENERATED_PUBLIC_KEY`) and
+`bundle.createUpdaterArtifacts` is intentionally **absent**, not `false` —
+empirically confirmed that setting it to `true` without a matching
+`TAURI_SIGNING_PRIVATE_KEY` breaks `tauri build` outright (a hard bundler
+error, not a graceful skip, unlike the macOS `APPLE_*` signing secrets).
+Do not flip that flag without also completing the rest of the README's
+"Enabling auto-updates" checklist — `release.yml` already forwards
+`TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` from repo secrets, but that alone
+does nothing until the config flag and real pubkey are also set.
+
 ## Conventions
 
 Carried over from the `sovereign` monorepo:
@@ -222,8 +244,11 @@ explicitly (LAN/dev instances); bare input defaults to `https://`.
 
 Epic 17 in the monorepo sequences this repo's work. Shipped: 17.1 shell
 scaffold, 17.2 system tray + OS notifications, 17.3 `sovereign://` deep
-links, 17.8 navigation policy enforcement. Remaining: 17.4 keychain credential
-storage, 17.5 auto-updater, 17.6 Mac App Store distribution, 17.7 SDK
-`"desktop"` environment (`sdk.device.*` — lands in the monorepo, not here).
-Tasks are assigned by the developer at session start — do not infer the next
-one.
+links, 17.5 auto-updater (mechanism shipped; see its section above — signing
+key setup is a separate, manual activation step, not code), 17.8 navigation
+policy enforcement. Remaining: 17.4 keychain credential storage — **blocked**,
+see [RFC 0072's addendum](https://github.com/sovereignfs/sovereign/blob/main/docs/rfcs/0072-external-oauth-provider.md#addendum-well-known-first-party-client-for-official-native-shells)
+in the monorepo before picking this up, 17.6 Mac App Store distribution,
+17.7 SDK `"desktop"` environment (`sdk.device.*` — lands in the monorepo,
+not here). Tasks are assigned by the developer at session start — do not
+infer the next one.

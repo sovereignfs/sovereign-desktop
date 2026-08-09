@@ -7,6 +7,13 @@
 # macOS signing secrets (see README):
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#
+# Auto-updater signing (see README's "Enabling auto-updates" section):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD — wired up
+#   below but inert until `src-tauri/tauri.conf.json`'s
+#   `bundle.createUpdaterArtifacts` is also set to `true`. Setting that flag
+#   without these secrets breaks every build, signed or not — don't flip it
+#   until both secrets are configured.
 name: Release
 
 on:
@@ -69,6 +76,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Auto-updater artifact signing — inert until createUpdaterArtifacts
+          # is also enabled (see the header comment above).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Sovereign Desktop ${{ github.ref_name }}'

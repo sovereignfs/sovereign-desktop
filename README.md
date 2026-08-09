@@ -38,6 +38,11 @@ clicking a `sovereign://` link while the app is already running currently
 opens a second instance of the app rather than routing to the existing
 window — a known limitation of not yet bundling the single-instance plugin.
 
+The app checks for updates once per launch. If a newer signed release is
+available, a native dialog offers **Update Now** (downloads, installs, and
+restarts the app) or **Later** (dismisses until the next launch). Nothing
+happens if you're already up to date.
+
 ## Detecting the desktop shell
 
 The shell injects a frozen marker into every page it loads — including your
@@ -89,6 +94,33 @@ unsigned (Gatekeeper will warn on macOS 10.15+).
 The app icons in `src-tauri/icons/` are generated from the Sovereign brand mark.
 To regenerate them from an updated source, run `pnpm tauri icon <source.png>`
 (1024×1024 PNG with transparency).
+
+### Enabling auto-updates
+
+The in-app update check (epic task 17.5) ships disabled-but-wired: it's safe
+to build and run today, but won't find or install anything until you
+complete this one-time setup. **Do these in order** —
+`bundle.createUpdaterArtifacts` requires the signing key to already exist,
+and enabling it before the key is configured breaks every build, `pnpm
+build` included, not just releases:
+
+1. Generate a signing keypair:
+   `pnpm tauri signer generate -w ~/.tauri/sovereign-desktop.key` (set a
+   password when prompted — recommended, not required).
+2. Add two repository secrets (Settings → Secrets and variables → Actions):
+   `TAURI_SIGNING_PRIVATE_KEY` (the private key file's contents) and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (blank if you skipped the password).
+   `release.yml` already forwards both to the build — nothing to edit there.
+3. Put the **public** key (the `.pub` file's contents, not secret) into
+   `src-tauri/tauri.conf.json`'s `plugins.updater.pubkey`, replacing the
+   `REPLACE_WITH_YOUR_GENERATED_PUBLIC_KEY` placeholder.
+4. Set `src-tauri/tauri.conf.json`'s `bundle.createUpdaterArtifacts` to
+   `true`.
+
+From the next tagged release onward, `release.yml` produces a signed
+`latest.json` update manifest alongside the installers, and the app's update
+check (pointed at `.../releases/latest/download/latest.json` by default)
+starts finding real releases.
 
 ## Troubleshooting
 

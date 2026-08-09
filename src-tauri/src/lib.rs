@@ -13,7 +13,9 @@ use tauri::tray::TrayIconBuilder;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_store::StoreExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const SWITCH_INSTANCE_MENU_ID: &str = "switch-instance";
 const TRAY_OPEN_MENU_ID: &str = "tray-open";
@@ -280,6 +282,64 @@ fn show_window<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     let _ = window.set_focus();
 }
 
+/// Epic task 17.5 — checks GitHub Releases (via `tauri.conf.json`'s
+/// `plugins.updater.endpoints`) once per launch and, if a newer signed
+/// build exists, shows a native "Update available" dialog rather than
+/// injecting any UI into the page — the shell's WebView may currently be
+/// showing the bundled local page or a loaded instance, and this must work
+/// either way without touching either. A native dialog (not a WebView
+/// banner) sidesteps that entirely and matches how the rest of this shell
+/// keeps product-facing UI out of the page.
+///
+/// No endpoint reachable, no update available, or the check erroring for
+/// any other reason (including an unset/placeholder `pubkey`, before a real
+/// signing key is configured) all resolve the same way: nothing happens,
+/// silently — matching the review checklist's "no update available → no UI
+/// shown".
+fn check_for_updates<R: Runtime>(app: &AppHandle<R>) {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(updater) = app_handle.updater() else {
+            return;
+        };
+        let Ok(Some(update)) = updater.check().await else {
+            return;
+        };
+
+        let message = match &update.body {
+            Some(notes) if !notes.trim().is_empty() => format!(
+                "Sovereign {} is available — you're on {}.\n\n{}",
+                update.version, update.current_version, notes
+            ),
+            _ => format!(
+                "Sovereign {} is available — you're on {}.",
+                update.version, update.current_version
+            ),
+        };
+
+        let install_handle = app_handle.clone();
+        app_handle
+            .dialog()
+            .message(message)
+            .title("Update available")
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Update Now".into(),
+                "Later".into(),
+            ))
+            .show(move |update_now| {
+                if !update_now {
+                    return;
+                }
+                tauri::async_runtime::spawn(async move {
+                    if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                        install_handle.restart();
+                    }
+                });
+            });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -287,6 +347,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![bridge::bridge_invoke])
         .setup(|app| {
             // On Windows/Linux, `sovereign://...` launches a *new* OS process with
@@ -412,6 +474,8 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .tooltip("Sovereign")
                 .build(app)?;
+
+            check_for_updates(&app.handle().clone());
 
             Ok(())
         })
