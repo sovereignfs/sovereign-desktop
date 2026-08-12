@@ -216,10 +216,17 @@ Carried over from the `sovereign` monorepo:
 - **Branch per change**, from up-to-date `main`: `feat/<slug>`, `fix/<slug>`,
   `docs/<slug>`, `chore/<slug>`.
 - **Commits** end with the Claude Code attribution trailer (model-agnostic):
-  `Co-Authored-By: Claude Code <noreply@anthropic.com>`
+  `Co-Authored-By: Claude Code <noreply@anthropic.com>`. (This has not been
+  reliably followed — 10 consecutive commits from `ceeb665` through
+  `25d276a` (2026-08-02 through 2026-08-09) used
+  `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` instead, and
+  merge commit `6716597` has no trailer at all. Check the actual trailer
+  before assuming this is followed; don't substitute a specific model name.)
 - **PRs** target `main`, created as GitHub drafts first (`gh pr create --draft`);
   bodies end with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - **Merge strategy: rebase and merge** — never squash, never merge commits.
+  (The repo's first and only PR, `6716597`, is a real merge commit, predating
+  this rule.)
 - **Verify before claiming done** — run the checks below and show the output.
 
 ### Versioning
